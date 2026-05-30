@@ -1,0 +1,30 @@
+# services:
+#   api:
+#     build: .
+#     ports:
+#       - "8000:8000"
+#     volumes:
+#       - .:/app
+#     environment:
+#       - PYTHONUNBUFFERED=1
+#     restart: unless-stopped
+
+# services:
+#   api:
+#     build: .
+#     ports:
+#       - "8000:8000"
+#     environment:
+#       - PYTHONUNBUFFERED=1
+#     restart: unless-stopped
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./pos_data.csv:/app/pos_data.csv
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
