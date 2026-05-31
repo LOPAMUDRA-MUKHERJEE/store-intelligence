@@ -135,7 +135,8 @@ class VisitorTracker:
         if signature != "unknown":
             for existing_sig, existing_visitor_id in self.active_signatures[store_id].items():
                 score = self.compare_signatures(signature, existing_sig)
-                if score > 0.85:
+                # if score > 0.85:
+                if score > 0.92:
                     # Same person already tracked from another camera
                     self.active_tracks[track_key] = {
                         "visitor_id": existing_visitor_id,
@@ -157,7 +158,8 @@ class VisitorTracker:
             if time_since_exit > self.reentry_window:
                 continue
             score = self.compare_signatures(signature, exited_info["signature"])
-            if score > 0.85 and score > best_score:
+            # if score > 0.85 and score > best_score:
+            if score > 0.90 and score > best_score:
                 best_score = score
                 best_match = exited_info
 
