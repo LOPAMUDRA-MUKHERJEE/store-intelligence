@@ -25,6 +25,7 @@ services:
       - "8000:8000"
     volumes:
       - ./pos_data.csv:/app/pos_data.csv
+      - .:/app
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped

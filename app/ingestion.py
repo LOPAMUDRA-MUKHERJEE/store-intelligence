@@ -10,7 +10,14 @@ logger = logging.getLogger(__name__)
 # Database setup
 # DATABASE_URL = "sqlite:///./store_intelligence.db"
 # DATABASE_URL = "sqlite:////app/data/store_intelligence.db"
-DATABASE_URL = "sqlite:////tmp/store_intelligence.db"
+# DATABASE_URL = "sqlite:////tmp/store_intelligence.db"
+# DATABASE_URL = "sqlite:////app/store_intelligence.db"
+import os
+DATABASE_URL = (
+    "sqlite:///./test_store.db"
+    if os.environ.get("TEST_MODE")
+    else "sqlite:////app/store_intelligence.db"
+)
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

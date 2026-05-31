@@ -5,17 +5,17 @@
     "open_hours": "10:00-22:00",
     "zones": {
       "SKINCARE": {
-        "bbox": [0, 0, 960, 400],
+        "bbox": [400, 250, 1920, 900],
         "camera": "CAM1",
         "sku_zone": "SKINCARE"
       },
       "MAKEUP": {
-        "bbox": [0, 400, 960, 1080],
-        "camera": "CAM1",
+        "bbox": [0, 250, 900, 1000],
+        "camera": "CAM2",
         "sku_zone": "MAKEUP"
       },
       "FLOOR_MAIN": {
-        "bbox": [0, 0, 1920, 1080],
+        "bbox": [0, 250, 1920, 1000],
         "camera": "CAM2",
         "sku_zone": "MAIN_FLOOR"
       },

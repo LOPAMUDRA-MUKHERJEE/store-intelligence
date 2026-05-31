@@ -45,16 +45,18 @@ class VisitorTracker:
         torso_h = int(crop.shape[0] * 0.6)
         torso = crop[:torso_h]
 
-        hist = np.histogram(torso.reshape(-1, 3), bins=8, range=(0, 256))[0]
+        hist = np.histogram(torso.reshape(-1, 3), bins=16, range=(0, 256))[0]
         hist = hist / (hist.sum() + 1e-6)
         sig = "_".join([f"{v:.2f}" for v in hist])
         return sig
-
+    
+    
     def detect_staff(self, bbox: list, frame: np.ndarray, track_id: int, store_id: str, timestamp: datetime) -> tuple:
         """
         Detect staff based on:
-        1. Black uniform (low brightness in HSV)
-        2. Rapid movement across zones
+        1. Movement pattern — staff move rapidly and frequently
+        2. Black uniform — low brightness AND low saturation in HSV
+        Both signals combined for better accuracy.
         Returns (is_staff, confidence)
         """
         x1, y1, x2, y2 = map(int, bbox)
@@ -62,38 +64,99 @@ class VisitorTracker:
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
 
-        if x2 <= x1 or y2 <= y1:
-            return False, 0.5
-
-        crop = frame[y1:y2, x1:x2]
-        if crop.size == 0:
-            return False, 0.5
-
-        # Check for black uniform — low brightness
-        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        # Black = low Value channel
-        value_channel = hsv[:, :, 2]
-        dark_ratio = np.sum(value_channel < 50) / (value_channel.size + 1e-6)
-
-        # Check for rapid zone movement
+        # Movement pattern signal
         key = f"{store_id}_{track_id}"
         self.zone_visit_times[key].append(timestamp)
         visits = self.zone_visit_times[key]
 
-        rapid_movement = False
-        if len(visits) >= 3:
+        movement_score = 0.0
+        if len(visits) >= 5:
             time_span = (visits[-1] - visits[0]).total_seconds()
-            if time_span < 60 and len(visits) >= 3:
-                rapid_movement = True
+            if time_span > 0:
+                movement_rate = len(visits) / time_span
+                if movement_rate > 0.5 and len(visits) > 10:
+                    movement_score = 0.8
+                elif movement_rate > 0.3 and len(visits) > 20:
+                    movement_score = 0.6
 
-        if dark_ratio > 0.4 and rapid_movement:
+        # Color signal — black uniform
+        color_score = 0.0
+        if x2 > x1 and y2 > y1:
+            crop = frame[y1:y2, x1:x2]
+            if crop.size > 0:
+                # Use torso only (top 60%)
+                torso_h = int(crop.shape[0] * 0.6)
+                torso = crop[:torso_h]
+                if torso.size > 0:
+                    hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+                    value_channel = hsv[:, :, 2]
+                    saturation_channel = hsv[:, :, 1]
+                    dark_ratio = np.sum(
+                        (value_channel < 60) & (saturation_channel < 60)
+                    ) / (value_channel.size + 1e-6)
+
+                    if dark_ratio > 0.5:
+                        color_score = 0.7
+                    elif dark_ratio > 0.35:
+                        color_score = 0.4
+
+        # Combine both signals
+        # Both agree = high confidence
+        # Only one signal = moderate confidence
+        if movement_score > 0.5 and color_score > 0.5:
             return True, 0.85
-        elif dark_ratio > 0.5:
-            return True, 0.7
-        elif rapid_movement:
-            return True, 0.6
-
+        elif movement_score > 0.5:
+            return True, movement_score
+        elif color_score > 0.6:
+            # Color alone only flags if very dark — avoids customer in black issue
+            return True, color_score * 0.7
+        
         return False, 0.5
+
+    # def detect_staff(self, bbox: list, frame: np.ndarray, track_id: int, store_id: str, timestamp: datetime) -> tuple:
+    #     """
+    #     Detect staff based on:
+    #     1. Black uniform (low brightness in HSV)
+    #     2. Rapid movement across zones
+    #     Returns (is_staff, confidence)
+    #     """
+    #     x1, y1, x2, y2 = map(int, bbox)
+    #     h, w = frame.shape[:2]
+    #     x1, y1 = max(0, x1), max(0, y1)
+    #     x2, y2 = min(w, x2), min(h, y2)
+
+    #     if x2 <= x1 or y2 <= y1:
+    #         return False, 0.5
+
+    #     crop = frame[y1:y2, x1:x2]
+    #     if crop.size == 0:
+    #         return False, 0.5
+
+    #     # Check for black uniform — low brightness
+    #     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    #     # Black = low Value channel
+    #     value_channel = hsv[:, :, 2]
+    #     dark_ratio = np.sum(value_channel < 50) / (value_channel.size + 1e-6)
+
+    #     # Check for rapid zone movement
+    #     key = f"{store_id}_{track_id}"
+    #     self.zone_visit_times[key].append(timestamp)
+    #     visits = self.zone_visit_times[key]
+
+    #     rapid_movement = False
+    #     if len(visits) >= 3:
+    #         time_span = (visits[-1] - visits[0]).total_seconds()
+    #         if time_span < 60 and len(visits) >= 3:
+    #             rapid_movement = True
+
+    #     if dark_ratio > 0.4 and rapid_movement:
+    #         return True, 0.85
+    #     elif dark_ratio > 0.5:
+    #         return True, 0.7
+    #     elif rapid_movement:
+    #         return True, 0.6
+
+    #     return False, 0.5
 
     def compare_signatures(self, sig1: str, sig2: str) -> float:
         if sig1 == "unknown" or sig2 == "unknown":
@@ -156,6 +219,9 @@ class VisitorTracker:
         for exited_info in self.exited_visitors[store_id]:
             time_since_exit = (timestamp - exited_info["exit_time"]).total_seconds()
             if time_since_exit > self.reentry_window:
+                continue
+            # Minimum 60 seconds before considering re-entry
+            if time_since_exit < 60:
                 continue
             score = self.compare_signatures(signature, exited_info["signature"])
             # if score > 0.85 and score > best_score:
