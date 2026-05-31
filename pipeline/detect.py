@@ -26,7 +26,7 @@ def is_crossing_threshold(prev_y: float, curr_y: float, threshold_y: float) -> s
     return None
 
 
-def get_zone_for_bbox(bbox: list, zones: dict, camera_id: str) -> str:
+def get_zone_for_bbox(bbox: list, zones: dict, camera_id: str):
     cx = (bbox[0] + bbox[2]) / 2
     cy = (bbox[1] + bbox[3]) / 2
     for zone_id, zone_info in zones.items():
@@ -60,6 +60,8 @@ def process_clip(
     prev_positions = {}
     zone_entry_times = {}
     zone_dwell_emitted = {}
+    billing_presence = {}
+    entry_cooldown = {}
     all_events = []
     batch_size = 50
 
@@ -88,10 +90,6 @@ def process_clip(
 
         current_track_ids = set(track_ids)
 
-        # Close tracks that disappeared
-        active_keys = [k for k in tracker.active_tracks if k.startswith(f"{store_id}_{camera_id}") or 
-                      k.startswith(f"{store_id}_") and k.endswith(f"_{camera_id}")]
-
         for key in list(tracker.active_tracks.keys()):
             parts = key.split("_")
             if len(parts) >= 3:
@@ -113,26 +111,34 @@ def process_clip(
 
             # ENTRY/EXIT logic
             if camera_type == "ENTRY":
+                curr_cy = (box[1] + box[3]) / 2
+
                 if track_id in prev_positions:
                     prev_cy = (prev_positions[track_id][1] + prev_positions[track_id][3]) / 2
-                    curr_cy = (box[1] + box[3]) / 2
                     crossing = is_crossing_threshold(prev_cy, curr_cy, threshold_y)
 
-                    if crossing == "ENTRY":
-                        event_type = "REENTRY" if is_reentry else "ENTRY"
-                        all_events.append(make_event(
-                            store_id=store_id,
-                            camera_id=camera_id,
-                            visitor_id=visitor_id,
-                            event_type=event_type,
-                            timestamp=timestamp,
-                            is_staff=is_staff,
-                            confidence=float(conf),
-                            session_seq=seq
-                        ))
-                        print(f"  {event_type}: visitor={visitor_id} staff={is_staff} conf={conf:.2f}")
+                    if crossing == "ENTRY" and float(conf) >= 0.3:
+                        last_entry = entry_cooldown.get(track_id)
+                        cooldown_ok = (
+                            last_entry is None or
+                            (timestamp - last_entry).total_seconds() > 10
+                        )
+                        if cooldown_ok:
+                            event_type = "REENTRY" if is_reentry else "ENTRY"
+                            all_events.append(make_event(
+                                store_id=store_id,
+                                camera_id=camera_id,
+                                visitor_id=visitor_id,
+                                event_type=event_type,
+                                timestamp=timestamp,
+                                is_staff=is_staff,
+                                confidence=float(conf),
+                                session_seq=seq
+                            ))
+                            entry_cooldown[track_id] = timestamp
+                            print(f"  {event_type}: visitor={visitor_id} staff={is_staff} conf={conf:.2f}")
 
-                    elif crossing == "EXIT":
+                    elif crossing == "EXIT" and float(conf) >= 0.3:
                         tracker.close_track(track_id, camera_id, store_id, timestamp)
                         all_events.append(make_event(
                             store_id=store_id,
@@ -146,7 +152,34 @@ def process_clip(
                         ))
                         print(f"  EXIT: visitor={visitor_id} staff={is_staff}")
 
-            # ZONE logic for floor cameras
+                else:
+                    # New track appearing inside threshold = group entry or missed crossing
+                    # if curr_cy < threshold_y * 0.85 and float(conf) >= 0.3:
+                    #     last_entry = entry_cooldown.get(track_id)
+                    #     cooldown_ok = (
+                    #         last_entry is None or
+                    #         (timestamp - last_entry).total_seconds() > 10
+                    #     )
+                    #     if cooldown_ok:
+                    #         event_type = "REENTRY" if is_reentry else "ENTRY"
+                    #         all_events.append(make_event(
+                    #             store_id=store_id,
+                    #             camera_id=camera_id,
+                    #             visitor_id=visitor_id,
+                    #             event_type=event_type,
+                    #             timestamp=timestamp,
+                    #             is_staff=is_staff,
+                    #             confidence=float(conf),
+                    #             session_seq=seq
+                    #         ))
+                    #         entry_cooldown[track_id] = timestamp
+                    #         print(f"  {event_type} (appeared inside): visitor={visitor_id} staff={is_staff} conf={conf:.2f}")
+                    pass
+                            # Group entry detection disabled for short clips
+                            # New track appearing inside = too noisy at door boundary
+                            # Re-enable for longer clips with clearer entry zones
+
+            # ZONE logic for floor and billing cameras
             if camera_type in ["FLOOR", "BILLING"]:
                 zone_id, sku_zone = get_zone_for_bbox(box, zones, camera_id)
 
@@ -155,6 +188,16 @@ def process_clip(
 
                     if track_id not in zone_entry_times:
                         zone_entry_times[track_id] = {}
+
+                    # Stationary behind counter = staff (billing camera only)
+                    if camera_type == "BILLING":
+                        if track_id not in billing_presence:
+                            billing_presence[track_id] = timestamp
+                        else:
+                            seconds_in_billing = (timestamp - billing_presence[track_id]).total_seconds()
+                            if seconds_in_billing > 60 and not is_staff:
+                                is_staff = True
+                                print(f"  Staff detected (stationary): visitor={visitor_id} seconds={int(seconds_in_billing)}")
 
                     if zone_id not in zone_entry_times[track_id]:
                         zone_entry_times[track_id][zone_id] = timestamp
@@ -171,7 +214,6 @@ def process_clip(
                             session_seq=seq
                         ))
 
-                        # Billing queue join
                         if camera_type == "BILLING":
                             billing_visitors = [
                                 v for k, v in tracker.active_tracks.items()
@@ -197,7 +239,7 @@ def process_clip(
                         dwell_ms = int((timestamp - zone_entry_times[track_id][zone_id]).total_seconds() * 1000)
                         last_dwell = zone_dwell_emitted.get(track_zone_key, 0)
 
-                        if dwell_ms - last_dwell >= 30000:
+                        if dwell_ms - last_dwell >= 10000:
                             all_events.append(make_event(
                                 store_id=store_id,
                                 camera_id=camera_id,
@@ -215,13 +257,11 @@ def process_clip(
 
             prev_positions[track_id] = box
 
-        # Emit in batches
         if len(all_events) >= batch_size:
             result = emit_events(all_events)
             print(f"  Batch emitted: {len(all_events)} events — {result}")
             all_events = []
 
-    # Emit remaining
     if all_events:
         result = emit_events(all_events)
         print(f"  Final batch: {len(all_events)} events — {result}")
@@ -254,8 +294,6 @@ if __name__ == "__main__":
         zones=store_zones,
         entry_threshold_y=args.threshold
     )
-
-
 
 
 

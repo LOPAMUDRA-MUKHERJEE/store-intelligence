@@ -21,6 +21,8 @@ class VisitorTracker:
         self.session_counter = defaultdict(int)
         # Track zone visit times for staff detection
         self.zone_visit_times = defaultdict(list)
+        # Track continuous billing zone presence: track_key -> first_seen_timestamp
+        self.billing_zone_entry = {}
 
     def generate_visitor_id(self, store_id: str) -> str:
         self.session_counter[store_id] += 1

@@ -49,7 +49,7 @@ def get_store_metrics(store_id: str, db: Session) -> dict:
                 AND e.zone_id = 'BILLING'
                 AND EXISTS (
                     SELECT 1 FROM pos_transactions p
-                    WHERE ABS(CAST((julianday(p.timestamp) - julianday(e.timestamp)) * 86400 AS INTEGER)) <= 300
+                    WHERE ABS(CAST((julianday(p.timestamp) - julianday(e.timestamp)) * 86400 AS INTEGER)) <= 10800
                 )
             """), {"store_id": store_id})
             converted_visitors = converted_result.fetchone()[0] or 0
