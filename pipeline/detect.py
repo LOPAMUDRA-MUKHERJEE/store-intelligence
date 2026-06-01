@@ -239,7 +239,7 @@ def process_clip(
                         dwell_ms = int((timestamp - zone_entry_times[track_id][zone_id]).total_seconds() * 1000)
                         last_dwell = zone_dwell_emitted.get(track_zone_key, 0)
 
-                        if dwell_ms - last_dwell >= 10000:
+                        if dwell_ms - last_dwell >= 5000:
                             all_events.append(make_event(
                                 store_id=store_id,
                                 camera_id=camera_id,

@@ -155,3 +155,23 @@ async def anomalies(store_id: str, db: Session = Depends(get_db)):
 @app.get("/health")
 async def health(db: Session = Depends(get_db)):
     return get_health(db)
+
+
+@app.get("/debug/events/{store_id}")
+async def debug_events(store_id: str, db: Session = Depends(get_db)):
+    from app.ingestion import EventDB
+    events = db.query(EventDB).filter(
+        EventDB.store_id == store_id,
+        EventDB.event_type == "ZONE_DWELL"
+    ).all()
+    return {
+        "zone_dwell_count": len(events),
+        "sample": [
+            {
+                "visitor_id": e.visitor_id,
+                "zone_id": e.zone_id,
+                "dwell_ms": e.dwell_ms
+            }
+            for e in events[:5]
+        ]
+    }
