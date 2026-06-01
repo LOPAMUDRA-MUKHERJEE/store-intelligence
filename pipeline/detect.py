@@ -241,6 +241,7 @@ def process_clip(
 
                         if dwell_ms - last_dwell >= 5000:
                             all_events.append(make_event(
+
                                 store_id=store_id,
                                 camera_id=camera_id,
                                 visitor_id=visitor_id,

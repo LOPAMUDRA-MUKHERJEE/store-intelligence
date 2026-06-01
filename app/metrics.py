@@ -123,6 +123,17 @@ def get_store_metrics(store_id: str, db: Session) -> dict:
 
 def get_store_heatmap(store_id: str, db: Session) -> dict:
     try:
+        # zone_data = db.query(
+        #     EventDB.zone_id,
+        #     func.count(EventDB.visitor_id).label("visit_count"),
+        #     func.avg(EventDB.dwell_ms).label("avg_dwell_ms")
+        # ).filter(
+        #     EventDB.store_id == store_id,
+        #     EventDB.is_staff == False,
+        #     EventDB.zone_id != None,
+        #     EventDB.event_type.in_(["ZONE_ENTER", "ZONE_DWELL"])
+        # ).group_by(EventDB.zone_id).all()
+        
         zone_data = db.query(
             EventDB.zone_id,
             func.count(EventDB.visitor_id).label("visit_count"),
@@ -131,8 +142,20 @@ def get_store_heatmap(store_id: str, db: Session) -> dict:
             EventDB.store_id == store_id,
             EventDB.is_staff == False,
             EventDB.zone_id != None,
-            EventDB.event_type.in_(["ZONE_ENTER", "ZONE_DWELL"])
+            EventDB.event_type == "ZONE_DWELL"
         ).group_by(EventDB.zone_id).all()
+
+        zone_visits = db.query(
+            EventDB.zone_id,
+            func.count(EventDB.visitor_id).label("visit_count")
+        ).filter(
+            EventDB.store_id == store_id,
+            EventDB.is_staff == False,
+            EventDB.zone_id != None,
+            EventDB.event_type == "ZONE_ENTER"
+        ).group_by(EventDB.zone_id).all()
+
+        visit_count_map = {row.zone_id: row.visit_count for row in zone_visits}
 
         if not zone_data:
             return {
@@ -145,7 +168,7 @@ def get_store_heatmap(store_id: str, db: Session) -> dict:
         total_sessions = db.query(EventDB).filter(
             EventDB.store_id == store_id,
             EventDB.is_staff == False,
-            EventDB.event_type == "ENTRY"
+            EventDB.event_type.in_(["ENTRY", "STORE_ENTER"])
         ).with_entities(EventDB.visitor_id).distinct().count()
 
         zones = []
@@ -153,7 +176,8 @@ def get_store_heatmap(store_id: str, db: Session) -> dict:
             normalised = round((row.visit_count / max_visits) * 100, 1) if max_visits > 0 else 0
             zones.append({
                 "zone_id": row.zone_id,
-                "visit_count": row.visit_count,
+                # "visit_count": row.visit_count,
+                "visit_count": visit_count_map.get(row.zone_id, 0),
                 "avg_dwell_ms": round(row.avg_dwell_ms, 2),
                 "normalised_score": normalised
             })

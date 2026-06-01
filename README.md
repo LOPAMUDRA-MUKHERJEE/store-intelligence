@@ -1,6 +1,9 @@
 # Store Intelligence System
 
-A complete pipeline that converts raw CCTV footage into live store analytics for Apex Retail.
+A complete pipeline that converts raw CCTV footage into live store analytics for Purplle
+
+**Store:** ST1008 — Brigade Road, Bangalore  
+**Dataset:** April 10, 2026
 
 ## Architecture
 CCTV Videos → Detection Pipeline → Event Stream → Intelligence API → Live Metrics
@@ -49,6 +52,9 @@ This processes all camera clips and pushes events into the API automatically.
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/stores/ST1008/metrics
+curl http://localhost:8000/stores/ST1008/heatmap
+curl http://localhost:8000/stores/ST1008/funnel
+curl http://localhost:8000/stores/ST1008/anomalies
 ```
 
 ## API Endpoints
@@ -61,6 +67,38 @@ curl http://localhost:8000/stores/ST1008/metrics
 | `GET /stores/{id}/heatmap` | Zone visit frequency normalised 0-100 |
 | `GET /stores/{id}/anomalies` | Queue spikes, dead zones, conversion drops |
 | `GET /health` | Service status and feed lag per store |
+
+### Sample `/metrics` response
+
+```json
+{
+  "store_id": "ST1008",
+  "date": "2026-04-10",
+  "unique_visitors": 12,
+  "converted_visitors": 3,
+  "conversion_rate": 0.25,
+  "avg_dwell_by_zone": {
+    "SKINCARE": 84300,
+    "MAKEUP": 61200,
+    "BILLING": 42000
+  },
+  "peak_hour": "20"
+}
+```
+
+### Sample `/funnel` response
+
+```json
+{
+  "store_id": "ST1008",
+  "funnel": [
+    { "stage": "STORE_ENTER", "visitors": 12, "drop_off_pct": 0 },
+    { "stage": "BROWSING_ZONE", "visitors": 9, "drop_off_pct": 25 },
+    { "stage": "BILLING_ZONE", "visitors": 5, "drop_off_pct": 44 },
+    { "stage": "CONVERTED", "visitors": 3, "drop_off_pct": 40 }
+  ]
+}
+```
 
 ## Running Tests
 
@@ -95,15 +133,24 @@ store-intelligence/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── store_layout.json
+|── pos_data.csv         # 24 transactions, April 10 2026, 13:00–19:00
 └── README.md
 
 ## Detection Pipeline Details
 
-- **Model:** YOLOv8n — fast CPU-compatible person detection
-- **Tracker:** ByteTrack — persistent identity across frames
-- **Re-ID:** 16-bin colour histogram signatures for cross-camera deduplication
-- **Staff detection:** Combined black uniform colour signal + movement pattern
-- **Entry/exit:** Vertical threshold crossing at 75% frame height
+| Component | Detail |
+|---|---|
+| Model | YOLOv8n — CPU-compatible person detection |
+| Tracker | Custom ByteTrack — persistent IDs + lost-track buffer |
+| Re-ID | 16-bin HSV histogram of torso region |
+| Staff filtering | Black uniform (HSV) + stationary 60s in billing zone |
+| Group detection | Implemented; disabled on CAM3 due to door boundary noise |
+| Re-entry guard | 60-second minimum gap before re-matching exited signatures |
+| Cross-camera dedup | Signatures shared across cameras per store session |
+| Entry/exit line | 75% frame height threshold |
+| Frame sampling | Every 3rd frame (5fps effective) |
+| ZONE_DWELL interval | 10 seconds |
+
 
 ## Key Design Decisions
 
@@ -120,3 +167,10 @@ Zones: SKINCARE (CAM1), MAKEUP + FLOOR_MAIN (CAM2), BILLING (CAM5)
 - CAM4 is a storage room — excluded from pipeline
 - Database persists at `/app/store_intelligence.db` via Docker volume
 - POS data loaded automatically on API startup
+
+## Known Limitations
+
+- **POS timestamp mismatch** — POS data (13:00–19:00) and footage (20:10+) don't overlap. Correlation window widened to 3 hours for this dataset. Production would use aligned clocks with a 5-minute window.
+- **Short clips (~2 min)** — dwell times underestimate real browsing behaviour. Full-shift footage gives accurate results.
+- **Dead zone anomalies** — will fire on short historical clips. Expected and documented.
+- **No bag detection** — conversion relies on POS matching only. Detecting shopping bags at the counter would add a camera-side conversion signal.
